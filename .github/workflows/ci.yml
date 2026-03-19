@@ -1,1 +1,28 @@
+name: CI/CD
 
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Node.js ${{ matrix.node-version }} verwenden
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Dependencies installieren
+        run: npm install
+
+      - name: Syntax prüfen
+        run: node --check main.js
