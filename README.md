@@ -1,6 +1,6 @@
 # ioBroker.luxtronik2ws
 
-## Alpha Innotec / Luxtronik 2.1 WebSocket Adapter
+## Alpha Innotec / Luxtronik WebSocket Adapter
 
 Verbindet ioBroker mit Alpha Innotec Wärmepumpen (Luxtronik 2.1 Steuerung) via WebSocket.
 
