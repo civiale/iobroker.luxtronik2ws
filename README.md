@@ -42,7 +42,7 @@ Admin → Adapter → Eigene URL → GitHub URL eintragen
 
 | Parameter | Standard | Beschreibung |
 |---|---|---|
-| IP Adresse | 192.168.1.67 | IP der Wärmepumpe |
+| IP Adresse | 192.168.xx.xx | IP der Wärmepumpe |
 | Port | 8214 | WebSocket Port |
 | Passwort | 999999 | Luxtronik Passwort |
 | Abfrageintervall | 30s | Wie oft Daten abgefragt werden |
