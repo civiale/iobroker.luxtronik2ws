@@ -1,1 +1,262 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Luxtronik WebSocket Test</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1a1a2e; color: #eee; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+  h1 { color: #00d4ff; margin-bottom: 5px; font-size: 1.4em; }
+  .subtitle { color: #888; font-size: 0.85em; margin-bottom: 20px; }
 
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: #16213e; border-radius: 8px; padding: 12px 16px;
+    margin-bottom: 20px; border: 1px solid #0f3460;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #ff4444; transition: background 0.3s; }
+  .dot.connected { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+  #status-text { font-size: 0.9em; color: #aaa; }
+
+  .connect-area { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+  .connect-area input {
+    background: #16213e; border: 1px solid #0f3460; color: #eee;
+    padding: 8px 12px; border-radius: 6px; font-size: 0.9em;
+  }
+
+  .btn {
+    padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer;
+    font-size: 0.85em; font-weight: 600; transition: all 0.2s;
+  }
+  .btn-connect { background: #00d4ff; color: #000; }
+  .btn-connect:hover { background: #00b8d9; }
+  .btn-disconnect { background: #ff4444; color: #fff; }
+  .btn-disconnect:hover { background: #cc3333; }
+  .btn-refresh { background: #00ff88; color: #000; }
+  .btn-refresh:hover { background: #00cc66; }
+  .btn-clear { background: #555; color: #fff; }
+  .btn-clear:hover { background: #444; }
+
+  .section-title {
+    color: #00d4ff; font-size: 0.8em; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin: 15px 0 8px 0;
+  }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 20px; min-height: 60px; }
+
+  .grid-empty { color: #555; font-size: 0.85em; padding: 15px 0; }
+
+  .card {
+    background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+    padding: 12px; cursor: pointer; transition: all 0.2s;
+  }
+  .card:hover { border-color: #00d4ff; background: #1a2a50; transform: translateY(-2px); }
+  .card.active { border-color: #00ff88; background: #0a2a1a; }
+  .card-icon { font-size: 1.5em; margin-bottom: 6px; }
+  .card-name { font-size: 0.85em; font-weight: 600; color: #eee; margin-bottom: 4px; }
+  .card-id { font-size: 0.7em; color: #666; font-family: monospace; }
+
+  .output-area {
+    background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px;
+    padding: 15px; height: 280px; overflow-y: auto; font-family: monospace;
+    font-size: 0.8em; line-height: 1.6;
+  }
+  .log-info { color: #00d4ff; }
+  .log-success { color: #00ff88; }
+  .log-error { color: #ff4444; }
+  .log-data { color: #ffcc00; }
+  .log-close { color: #ff8800; }
+
+  .parsed-output {
+    background: #0d0d1a; border: 1px solid #0f3460; border-radius: 8px;
+    padding: 15px; margin-top: 15px; display: none;
+  }
+  .parsed-output h3 { color: #00d4ff; margin-bottom: 10px; font-size: 0.95em; }
+  .value-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; }
+  .value-item {
+    background: #16213e; border-radius: 6px; padding: 8px 12px;
+    border-left: 3px solid #00d4ff;
+  }
+  .value-name { font-size: 0.75em; color: #888; }
+  .value-val { font-size: 1em; font-weight: 600; color: #eee; }
+  .value-unit { font-size: 0.75em; color: #00d4ff; }
+</style>
+</head>
+<body>
+
+<h1>🔥 Luxtronik WebSocket Tester</h1>
+<p class="subtitle">Alpha Innotec Wärmepumpe — Dynamische Datenabfrage v2.0</p>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="status-text">Nicht verbunden</span>
+</div>
+
+<div class="connect-area">
+  <input type="text" id="ip" value="192.168.x.xx" placeholder="IP Adresse" style="width:150px">
+  <input type="text" id="port" value="8214" placeholder="Port" style="width:70px">
+  <input type="text" id="password" value="999999" placeholder="Passwort" style="width:90px">
+  <button class="btn btn-connect" onclick="connect()">🔌 Verbinden</button>
+  <button class="btn btn-disconnect" onclick="disconnect()">✖ Trennen</button>
+  <button class="btn btn-refresh" onclick="sendRefresh()">🔄 REFRESH</button>
+  <button class="btn btn-clear" onclick="clearLog()">🗑 Log leeren</button>
+</div>
+
+<p class="section-title">📂 Bereiche (werden automatisch nach Verbindung geladen)</p>
+<div class="grid" id="nav-grid">
+  <div class="grid-empty">⬆️ Bitte zuerst Verbinden klicken...</div>
+</div>
+
+<p class="section-title">📋 Log</p>
+<div class="output-area" id="output"></div>
+
+<div class="parsed-output" id="parsed">
+  <h3 id="parsed-title">📊 Werte</h3>
+  <div class="value-grid" id="value-grid"></div>
+</div>
+
+<script>
+var ws = null;
+
+var icons = {
+  'Temperaturen': '🌡️', 'Eingänge': '📥', 'Ausgänge': '📤',
+  'Ablaufzeiten': '⏱️', 'Betriebsstunden': '🕐', 'Fehlerspeicher': '⚠️',
+  'Abschaltungen': '🛑', 'Anlagenstatus': '📊', 'Wärmemenge': '🔥',
+  'Leistungsaufnahme': '⚡', 'GLT': '🏢', 'Smart Home Interface': '🏠',
+  'Energiemonitor': '📈', 'Betriebsart': '🔧', 'System Einstellung': '⚙️',
+  'Zeitschaltprogramm': '📅', 'Heizung': '♨️', 'Warmwasser': '🚿',
+  'Woche': '📆', '5+2': '📆', 'Tage (Mo, Di...)': '📆',
+  'Zugang: Benutzer': '👤', 'Fernsteuerung': '📡',
+  'Einstellungen': '⚙️', 'Informationen': 'ℹ️'
+};
+
+function getIcon(name) { return icons[name] || '📋'; }
+
+function log(msg, type) {
+  var out = document.getElementById('output');
+  var time = new Date().toLocaleTimeString();
+  var div = document.createElement('div');
+  div.className = 'log-' + (type || 'info');
+  div.textContent = '[' + time + '] ' + msg;
+  out.appendChild(div);
+  out.scrollTop = out.scrollHeight;
+}
+
+function connect() {
+  var ip = document.getElementById('ip').value;
+  var port = document.getElementById('port').value;
+  var pw = document.getElementById('password').value;
+  log('Verbinde mit ws://' + ip + ':' + port + ' ...', 'info');
+  ws = new WebSocket('ws://' + ip + ':' + port, 'Lux_WS');
+
+  ws.onopen = function() {
+    document.getElementById('dot').classList.add('connected');
+    document.getElementById('status-text').textContent = 'Verbunden mit ' + ip + ':' + port;
+    log('✅ Verbunden! Sende Login...', 'success');
+    ws.send('LOGIN;' + pw);
+  };
+  ws.onmessage = function(e) {
+    log('📥 ' + e.data.substring(0, 120) + (e.data.length > 120 ? '...' : ''), 'data');
+    handleMessage(e.data);
+  };
+  ws.onerror = function() { log('❌ Verbindungsfehler!', 'error'); };
+  ws.onclose = function() {
+    document.getElementById('dot').classList.remove('connected');
+    document.getElementById('status-text').textContent = 'Nicht verbunden';
+    log('🔌 Verbindung getrennt', 'close');
+  };
+}
+
+function disconnect() { if (ws) { ws.close(); ws = null; } }
+
+function sendRefresh() {
+  if (ws && ws.readyState === 1) { ws.send('REFRESH'); log('🔄 REFRESH gesendet', 'info'); }
+  else log('⚠️ Nicht verbunden!', 'error');
+}
+
+function getData(id, name) {
+  if (ws && ws.readyState === 1) {
+    ws.send('GET;' + id);
+    log('📤 GET ' + name + ' (' + id + ')', 'info');
+  } else {
+    log('⚠️ Nicht verbunden!', 'error');
+  }
+}
+
+function clearLog() {
+  document.getElementById('output').innerHTML = '';
+  document.getElementById('parsed').style.display = 'none';
+}
+
+function handleMessage(data) {
+  try {
+    var json = JSON.parse(data);
+
+    // Navigation aufbauen
+    if (json.type === 'Navigation' && json.items) {
+      buildNavigation(json.items);
+      return;
+    }
+
+    // Datenwerte anzeigen
+    if (json.items && json.items.length > 0) {
+      var hasValues = json.items.some(function(i) { return i.value !== undefined; });
+      if (hasValues) showValues(json.items, json.name || '');
+    }
+  } catch(e) {}
+}
+
+function buildNavigation(sections) {
+  var grid = document.getElementById('nav-grid');
+  grid.innerHTML = '';
+  var count = 0;
+
+  function addCard(item) {
+    if (!item.id || !item.name) return;
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML =
+      '<div class="card-icon">' + getIcon(item.name) + '</div>' +
+      '<div class="card-name">' + item.name + '</div>' +
+      '<div class="card-id">' + item.id + '</div>';
+    card.onclick = function() {
+      document.querySelectorAll('.card').forEach(function(c) { c.classList.remove('active'); });
+      card.classList.add('active');
+      document.getElementById('parsed-title').textContent = '📊 ' + item.name;
+      getData(item.id, item.name);
+    };
+    grid.appendChild(card);
+    count++;
+
+    if (item.items && item.items.length > 0) {
+      item.items.forEach(function(sub) { addCard(sub); });
+    }
+  }
+
+  sections.forEach(function(section) {
+    if (section.items) section.items.forEach(function(item) { addCard(item); });
+  });
+
+  log('✅ ' + count + ' Bereiche geladen — bitte Bereich anklicken!', 'success');
+}
+
+function showValues(items, title) {
+  var grid = document.getElementById('value-grid');
+  grid.innerHTML = '';
+  items.forEach(function(item) {
+    if (item.value !== undefined) {
+      var div = document.createElement('div');
+      div.className = 'value-item';
+      div.innerHTML =
+        '<div class="value-name">' + (item.name || item.id || '') + '</div>' +
+        '<span class="value-val">' + item.value + '</span> ' +
+        '<span class="value-unit">' + (item.unit || '') + '</span>';
+      grid.appendChild(div);
+    }
+  });
+  if (grid.children.length > 0) document.getElementById('parsed').style.display = 'block';
+}
+</script>
+</body>
+</html>
