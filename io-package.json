@@ -14,67 +14,64 @@
       "de": "Luxtronik 2.1 WebSocket"
     },
     "desc": {
-      "en": "Connects ioBroker to Alpha Innotec / Luxtronik 2.1 heat pumps via WebSocket protocol (Lux_WS). Supports firmware V3.81 and newer. Automatically reads all available data points such as temperatures, operating hours, energy monitor and system status.",
-      "de": "Verbindet ioBroker mit Alpha Innotec / Luxtronik 2.1 Wärmepumpen via WebSocket-Protokoll (Lux_WS). Unterstützt Firmware V3.81 und neuer. Liest automatisch alle verfügbaren Datenpunkte wie Temperaturen, Betriebsstunden, Energiemonitor und Anlagenstatus."
+      "en": "Connects ioBroker to Alpha Innotec / Luxtronik 2.1 heat pumps via WebSocket (Lux_WS protocol). Replacement for the no longer working UncleSamSwiss adapter. Supports firmware V3.81+. Automatically reads temperatures, operating hours, energy monitor, system status and more.",
+      "de": "Verbindet ioBroker mit Alpha Innotec / Luxtronik 2.1 Wärmepumpen via WebSocket (Lux_WS Protokoll). Ersatz für den nicht mehr funktionierenden UncleSamSwiss Adapter. Unterstützt Firmware V3.81+. Liest automatisch Temperaturen, Betriebsstunden, Energiemonitor, Anlagenstatus und mehr."
     },
-    "authors": [
-      "alessandrocivi <github.com/civiale>"
-    ],
-    "keywords": [
-      "luxtronik",
-      "luxtronik2",
-      "alpha innotec",
-      "wärmepumpe",
-      "heatpump",
-      "websocket",
-      "novelan",
-      "heating"
-    ],
+    "authors": ["alessandrocivi <github.com/civiale>"],
+    "keywords": ["luxtronik", "luxtronik2", "alpha innotec", "wärmepumpe", "heatpump", "websocket", "novelan", "loxone", "heating"],
     "license": "MIT",
     "type": "climate-control",
     "icon": "admin/luxtronik.png",
+    "extIcon": "https://raw.githubusercontent.com/civiale/iobroker.luxtronik2ws/main/admin/luxtronik.png",
     "enabled": true,
     "readme": "https://github.com/civiale/iobroker.luxtronik2ws/blob/main/README.md",
     "loglevel": "info",
     "mode": "daemon",
     "platform": "Javascript/Node.js",
-    "adminUI": {
-      "config": "json"
-    },
+    "adminUI": { "config": "json" },
     "connectionType": "local",
     "dataSource": "push",
     "tier": 2,
-    "version": "0.1.0",
     "licenseUrl": "https://github.com/civiale/iobroker.luxtronik2ws/blob/main/LICENSE",
-    "extIcon": "https://raw.githubusercontent.com/civiale/iobroker.luxtronik2ws/main/admin/luxtronik.png",
-    "logTransporter": false,
-    "compact": false
+    "dependencies": [{ "js-controller": ">=4.0.0" }],
+    "globalDependencies": [{ "admin": ">=6.0.0" }]
   },
   "native": {
     "host": "",
     "port": 8214,
     "password": "999999",
     "pollInterval": 30,
-    "reconnectInterval": 60
+    "reconnectInterval": 60,
+    "loxoneEnabled": false,
+    "loxoneMqttHost": "",
+    "loxoneMqttPort": 1883,
+    "loxoneMqttUser": "",
+    "loxoneMqttPassword": "",
+    "loxoneMqttTopic": "waermepumpe",
+    "fetchTemperaturen": true,
+    "fetchEingaenge": true,
+    "fetchAusgaenge": true,
+    "fetchBetriebsstunden": true,
+    "fetchAnlagenstatus": true,
+    "fetchEnergiemonitor": true,
+    "fetchAblaufzeiten": false,
+    "fetchFehlerspeicher": false,
+    "fetchSHI": false
   },
+  "encryptedNative": ["password", "loxoneMqttPassword"],
   "objects": [],
   "instanceObjects": [
     {
       "_id": "info",
       "type": "channel",
-      "common": {
-        "name": "Information"
-      },
+      "common": { "name": "Information" },
       "native": {}
     },
     {
       "_id": "info.connection",
       "type": "state",
       "common": {
-        "name": {
-          "en": "Connection status",
-          "de": "Verbindungsstatus"
-        },
+        "name": { "en": "Connection status", "de": "Verbindungsstatus" },
         "type": "boolean",
         "role": "indicator.connected",
         "read": true,

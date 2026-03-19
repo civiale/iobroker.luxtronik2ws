@@ -2,6 +2,11 @@
 
 const utils = require('@iobroker/adapter-core');
 const WebSocket = require('ws');
+let mqttClient = null;
+
+// MQTT optional laden
+let mqtt;
+try { mqtt = require('mqtt'); } catch(e) { mqtt = null; }
 
 class Luxtronik2WS extends utils.Adapter {
 
@@ -15,28 +20,80 @@ class Luxtronik2WS extends utils.Adapter {
         this.isReady = false;
         this.createdObjects = new Set();
 
+        // Mapping: Bereichsname → Config-Flag
+        this.sectionMapping = {
+            'Temperaturen':         'fetchTemperaturen',
+            'Eingänge':             'fetchEingaenge',
+            'Ausgänge':             'fetchAusgaenge',
+            'Betriebsstunden':      'fetchBetriebsstunden',
+            'Anlagenstatus':        'fetchAnlagenstatus',
+            'Energiemonitor':       'fetchEnergiemonitor',
+            'Wärmemenge':           'fetchEnergiemonitor',
+            'Leistungsaufnahme':    'fetchEnergiemonitor',
+            'Ablaufzeiten':         'fetchAblaufzeiten',
+            'Fehlerspeicher':       'fetchFehlerspeicher',
+            'Abschaltungen':        'fetchFehlerspeicher',
+            'GLT':                  'fetchSHI',
+            'Smart Home Interface': 'fetchSHI'
+        };
+
         this.on('ready', this.onReady.bind(this));
         this.on('unload', this.onUnload.bind(this));
     }
 
-    // ─── Start ────────────────────────────────────────────────────────────────
-
     async onReady() {
-        this.log.info(`Luxtronik2WS Adapter gestartet`);
-        this.log.info(`Verbinde mit ${this.config.host}:${this.config.port}`);
+        this.log.info(`Luxtronik2WS Adapter gestartet v0.1.0`);
+        this.log.info(`Ziel: ${this.config.host}:${this.config.port}`);
         await this.setStateAsync('info.connection', false, true);
+
+        // MQTT für Loxone starten
+        if (this.config.loxoneEnabled && this.config.loxoneMqttHost) {
+            this.connectMqtt();
+        }
+
         this.connect();
     }
 
-    // ─── WebSocket Verbindung ─────────────────────────────────────────────────
+    // ─── MQTT für Loxone ──────────────────────────────────────────────────────
+
+    connectMqtt() {
+        if (!mqtt) {
+            this.log.warn('MQTT Modul nicht verfügbar — npm install mqtt ausführen');
+            return;
+        }
+        const host = this.config.loxoneMqttHost;
+        const port = this.config.loxoneMqttPort || 1883;
+        const url = `mqtt://${host}:${port}`;
+
+        const opts = { clientId: 'iobroker-luxtronik2ws' };
+        if (this.config.loxoneMqttUser) opts.username = this.config.loxoneMqttUser;
+        if (this.config.loxoneMqttPassword) opts.password = this.config.loxoneMqttPassword;
+
+        mqttClient = mqtt.connect(url, opts);
+        mqttClient.on('connect', () => {
+            this.log.info(`✅ MQTT verbunden mit ${url} (Loxone)`);
+            mqttClient.publish(`${this.config.loxoneMqttTopic}/status`, 'online', { retain: true });
+        });
+        mqttClient.on('error', (e) => this.log.error(`MQTT Fehler: ${e.message}`));
+        mqttClient.on('close', () => this.log.warn('MQTT Verbindung getrennt'));
+    }
+
+    publishMqtt(section, name, value, unit) {
+        if (!this.config.loxoneEnabled || !mqttClient || !mqttClient.connected) return;
+        const prefix = this.config.loxoneMqttTopic || 'waermepumpe';
+        const topic = `${prefix}/${this.buildStateId(section, name)}`;
+        const payload = unit ? `${value} ${unit}` : String(value);
+        mqttClient.publish(topic, payload, { retain: true });
+    }
+
+    // ─── WebSocket ────────────────────────────────────────────────────────────
 
     connect() {
         const url = `ws://${this.config.host}:${this.config.port}`;
-
         try {
             this.ws = new WebSocket(url, 'Lux_WS');
         } catch (e) {
-            this.log.error(`WebSocket Fehler beim Erstellen: ${e.message}`);
+            this.log.error(`WebSocket Fehler: ${e.message}`);
             this.scheduleReconnect();
             return;
         }
@@ -45,43 +102,37 @@ class Luxtronik2WS extends utils.Adapter {
             this.log.info(`✅ Verbunden mit ${url}`);
             this.isConnected = true;
             this.setStateAsync('info.connection', true, true);
-            // Login senden
             this.send(`LOGIN;${this.config.password}`);
         });
 
-        this.ws.on('message', (data) => {
-            this.handleMessage(data.toString());
-        });
+        this.ws.on('message', (data) => this.handleMessage(data.toString()));
 
         this.ws.on('close', () => {
-            this.log.warn(`🔌 Verbindung getrennt`);
+            this.log.warn('🔌 Verbindung getrennt');
             this.isConnected = false;
             this.isReady = false;
             this.setStateAsync('info.connection', false, true);
+            if (this.config.loxoneEnabled && mqttClient && mqttClient.connected) {
+                mqttClient.publish(`${this.config.loxoneMqttTopic}/status`, 'offline', { retain: true });
+            }
             this.clearTimers();
             this.scheduleReconnect();
         });
 
-        this.ws.on('error', (err) => {
-            this.log.error(`WebSocket Fehler: ${err.message}`);
-        });
+        this.ws.on('error', (err) => this.log.error(`WebSocket Fehler: ${err.message}`));
     }
 
     send(msg) {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(msg);
-            this.log.debug(`📤 Gesendet: ${msg}`);
-        } else {
-            this.log.warn(`⚠️ Senden nicht möglich - nicht verbunden`);
+            this.log.debug(`📤 ${msg}`);
         }
     }
 
     scheduleReconnect() {
         const interval = (this.config.reconnectInterval || 60) * 1000;
-        this.log.info(`🔄 Reconnect in ${this.config.reconnectInterval || 60} Sekunden...`);
-        this.reconnectTimer = setTimeout(() => {
-            this.connect();
-        }, interval);
+        this.log.info(`🔄 Reconnect in ${this.config.reconnectInterval || 60}s...`);
+        this.reconnectTimer = setTimeout(() => this.connect(), interval);
     }
 
     clearTimers() {
@@ -89,49 +140,40 @@ class Luxtronik2WS extends utils.Adapter {
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     }
 
-    // ─── Nachricht verarbeiten ────────────────────────────────────────────────
+    // ─── Nachrichten ─────────────────────────────────────────────────────────
 
     handleMessage(raw) {
         let data;
-        try {
-            data = JSON.parse(raw);
-        } catch (e) {
-            this.log.debug(`Nicht-JSON Antwort: ${raw.substring(0, 100)}`);
-            return;
-        }
+        try { data = JSON.parse(raw); } catch (e) { return; }
 
-        // Navigation empfangen → IDs extrahieren & alle Bereiche abrufen
         if (data.type === 'Navigation' && data.items) {
-            this.log.info(`📂 Navigation empfangen`);
+            this.log.info('📂 Navigation empfangen');
             this.navIds = [];
             this.extractNavIds(data.items);
-            this.log.info(`📋 ${this.navIds.length} Bereiche gefunden`);
+            this.log.info(`📋 ${this.navIds.length} Bereiche gefunden (nach Filter: ${this.navIds.filter(n => this.isSectionEnabled(n.name)).length} aktiv)`);
             this.isReady = true;
-
-            // Sofort alle Daten abrufen
             this.pollAll();
-
-            // Polling starten
             const interval = (this.config.pollInterval || 30) * 1000;
             this.pollTimer = setInterval(() => this.pollAll(), interval);
             return;
         }
 
-        // Datenwerte empfangen → States setzen
         if (data.items && Array.isArray(data.items)) {
             this.processItems(data.items, data.name || 'unknown');
         }
     }
 
+    isSectionEnabled(name) {
+        const flag = this.sectionMapping[name];
+        if (!flag) return true; // unbekannte Bereiche immer abfragen
+        return this.config[flag] !== false;
+    }
+
     extractNavIds(sections) {
         const recurse = (items) => {
             for (const item of items) {
-                if (item.id && item.name) {
-                    this.navIds.push({ id: item.id, name: item.name });
-                }
-                if (item.items && item.items.length > 0) {
-                    recurse(item.items);
-                }
+                if (item.id && item.name) this.navIds.push({ id: item.id, name: item.name });
+                if (item.items && item.items.length > 0) recurse(item.items);
             }
         };
         for (const section of sections) {
@@ -141,44 +183,45 @@ class Luxtronik2WS extends utils.Adapter {
 
     pollAll() {
         if (!this.isReady || !this.isConnected) return;
-        this.log.debug(`🔄 Polling ${this.navIds.length} Bereiche...`);
-        for (const entry of this.navIds) {
+        const active = this.navIds.filter(n => this.isSectionEnabled(n.name));
+        this.log.debug(`🔄 Polling ${active.length} Bereiche...`);
+        for (const entry of active) {
             this.send(`GET;${entry.id}`);
         }
     }
 
-    // ─── States verarbeiten ───────────────────────────────────────────────────
+    // ─── States + MQTT ────────────────────────────────────────────────────────
 
     async processItems(items, sectionName) {
         for (const item of items) {
-            if (item.value === undefined || item.value === null) continue;
-            if (!item.name) continue;
+            if (item.value === undefined || item.value === null || !item.name) continue;
 
             const stateId = this.buildStateId(sectionName, item.name);
             const value = this.parseValue(item.value);
             const unit = item.unit || '';
             const role = this.guessRole(item.name, unit);
-            const type = typeof value;
 
-            // Objekt erstellen falls noch nicht vorhanden
             if (!this.createdObjects.has(stateId)) {
                 await this.setObjectNotExistsAsync(stateId, {
                     type: 'state',
                     common: {
                         name: item.name,
-                        type: type,
+                        type: typeof value,
                         role: role,
                         unit: unit,
                         read: true,
-                        write: item.readOnly === false ? true : false,
+                        write: item.readOnly === false,
                     },
                     native: { luxId: item.id || '' }
                 });
                 this.createdObjects.add(stateId);
             }
 
-            // State setzen
             await this.setStateAsync(stateId, { val: value, ack: true });
+
+            // An Loxone via MQTT senden
+            this.publishMqtt(sectionName, item.name, value, unit);
+
             this.log.debug(`📊 ${stateId} = ${value} ${unit}`);
         }
     }
@@ -187,15 +230,12 @@ class Luxtronik2WS extends utils.Adapter {
         const clean = (s) => s
             .toLowerCase()
             .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
-            .replace(/[^a-z0-9_]/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_|_$/g, '');
+            .replace(/[^a-z0-9_]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
         return `${clean(section)}.${clean(name)}`;
     }
 
     parseValue(raw) {
-        if (typeof raw === 'number') return raw;
-        if (typeof raw === 'boolean') return raw;
+        if (typeof raw === 'number' || typeof raw === 'boolean') return raw;
         const num = parseFloat(raw);
         if (!isNaN(num) && String(num) === String(raw)) return num;
         if (raw === 'true') return true;
@@ -204,13 +244,12 @@ class Luxtronik2WS extends utils.Adapter {
     }
 
     guessRole(name, unit) {
-        const n = name.toLowerCase();
-        if (unit === '°C' || n.includes('temperatur')) return 'value.temperature';
-        if (unit === 'kWh' || n.includes('energie')) return 'value.energy';
-        if (unit === 'kW' || unit === 'W' || n.includes('leistung')) return 'value.power';
-        if (unit === 'h' || n.includes('stunden')) return 'value';
+        if (unit === '°C' || name.toLowerCase().includes('temperatur')) return 'value.temperature';
+        if (unit === 'kWh') return 'value.energy';
+        if (unit === 'kW' || unit === 'W') return 'value.power';
         if (unit === '%') return 'value.battery';
-        if (typeof this.parseValue(name) === 'boolean') return 'indicator';
+        if (unit === 'h') return 'value';
+        if (unit === 'bar') return 'value.pressure';
         return 'value';
     }
 
@@ -219,19 +258,14 @@ class Luxtronik2WS extends utils.Adapter {
     onUnload(callback) {
         try {
             this.clearTimers();
-            if (this.ws) {
-                this.ws.terminate();
-                this.ws = null;
-            }
+            if (mqttClient) { mqttClient.end(); mqttClient = null; }
+            if (this.ws) { this.ws.terminate(); this.ws = null; }
             this.log.info('Adapter gestoppt');
             callback();
-        } catch (e) {
-            callback();
-        }
+        } catch (e) { callback(); }
     }
 }
 
-// Adapter starten
 if (require.main !== module) {
     module.exports = (options) => new Luxtronik2WS(options);
 } else {
